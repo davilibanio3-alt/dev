@@ -1,0 +1,18 @@
+{
+  "name": "calixtosuper-staking",
+  "version": "1.0.0",
+  "description": "CalixtoSuper Staking & Exchange — BSC Mainnet",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "deploy:bsc": "npx hardhat run scripts/deploy.js --network bsc",
+    "verify": "npx hardhat verify --network bsc",
+    "frontend": "npx http-server frontend -p 8080"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0"
+  }
+}

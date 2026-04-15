@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>CalixtoSuper Exchange</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0b0e11;
+      color: #eee;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 16px; }
+    button {
+      background: #f0b90b;
+      color: #0b0e11;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.85; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 24px;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .card {
+      background: #1e2329;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 { margin-bottom: 8px; }
+    #txs {
+      list-style: none;
+      max-width: 600px;
+      margin: 12px auto;
+      text-align: left;
+    }
+    #txs li {
+      background: #1e2329;
+      padding: 8px 12px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    #send-to {
+      width: 320px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #181a20;
+      color: #eee;
+      margin-bottom: 8px;
+    }
+    #send-amount {
+      width: 120px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #181a20;
+      color: #eee;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>📊 CalixtoSuper Exchange</h1>
+
+<button id="btn-connect" onclick="connectWallet()">Conectar Wallet</button>
+<p id="wallet-addr" style="margin-top:8px;font-size:13px;color:#888"></p>
+
+<div class="grid">
+
+  <div class="card">
+    <h3>💰 Saldo</h3>
+    <p id="balance">-</p>
+
+    <h3 style="margin-top:16px">📦 Supply Total</h3>
+    <p id="supply">-</p>
+  </div>
+
+  <div class="card">
+    <h3>📈 Gráfico de Preço</h3>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="card" style="grid-column:span 2">
+    <h3>💸 Enviar Token</h3>
+    <div style="margin-top:12px">
+      <input id="send-to" type="text" placeholder="Endereço destino (0x...)">
+      <input id="send-amount" type="text" placeholder="Quantidade">
+      <br>
+      <button onclick="sendToken()" style="margin-top:8px">Enviar</button>
+    </div>
+  </div>
+
+</div>
+
+<h3 style="margin-top:24px">📜 Últimas Transações</h3>
+<ul id="txs"></ul>
+
+<script src="app.js"></script>
+
+</body>
+</html>

@@ -1,240 +1,107 @@
-[2/4 03:33] Davi Calixto: https://20lab.app/token/bnb-smart-chain/0x4822e7d596772e58C567c5eD0510bb8f8f318d84
-[9/4 00:31] Davi Calixto: 0x4822e7d596772e58C567c5eD0510bb8f8f318d84
-[12/4 22:54] Davi Calixto: // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+# CalixtoSuper Staking & Exchange
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+Plataforma de staking e exchange para o token CALXT na BSC Mainnet.
 
-contract CalixtoStaking is ReentrancyGuard, Ownable {
-    IERC20 public immutable token;
-    
-    struct Stake {
-        uint256 amount;
-        uint256 startTime;
-    }
-    
-    mapping(address => Stake) public stakes;
-    
-    uint256 public rewardRate = 10; // 10% ao ano
-    uint256 public totalStaked;
-    
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount, uint256 reward);
-    event RewardRateUpdated(uint256 newRate);
+## Token
 
-    constructor(address _token) Ownable(msg.sender) {
-        token = IERC20(_token);
-    }
+- **Rede:** BNB Smart Chain (BSC)
+- **Contrato CALXT:** `0x4822e7d596772e58C567c5eD0510bb8f8f318d84`
+- **Explorer:** [BscScan](https://bscscan.com/token/0x4822e7d596772e58C567c5eD0510bb8f8f318d84)
 
-    function stake(uint256 amount) external nonReentrant {
-        require(amount > 0, "Amount must be > 0");
-        
-        token.transferFrom(msg.sender, address(this), amount);
-        
-        stakes[msg.sender].amount += amount;
-        if (stakes[msg.sender].startTime == 0) {
-            stakes[msg.sender].startTime = block.timestamp;
-        }
-        
-        totalStaked += amount;
-        
-        emit Staked(msg.sender, amount);
-    }
+## Estrutura do Projeto
 
-    function calculateReward(address user) public view returns (uint256) {
-        Stake memory s = stakes[user];
-        if (s.amount == 0) return 0;
-        
-        uint256 duration = block.timestamp - s.startTime;
-        return (s.amount * rewardRate * duration) / (365 days * 100);
-    }
+```
+contracts/
+  CalixtoStaking.sol      # Contrato de staking com recompensas
+  CalixtoLiquidity.sol    # Lock de LP tokens (lastro BNB real)
+  MockERC20.sol           # Token mock para testes
+frontend/
+  index.html              # Interface web da exchange
+  app.js                  # Lógica de conexão wallet e dashboard
+scripts/
+  deploy.js               # Deploy individual do staking
+  deploy-full.js          # Deploy completo: staking + liquidez + lock LP
+  post-deploy.js          # Pós-deploy: recompensas + liquidez
+test/
+  CalixtoStaking.test.js  # 16 testes automatizados
+hardhat.config.js         # Configuração Hardhat (BSC mainnet + testnet)
+package.json              # Dependências
+```
 
-    function withdraw() external nonReentrant {
-        Stake memory s = stakes[msg.sender];
-        require(s.amount > 0, "No active stake");
-        
-        uint256 reward = calculateReward(msg.sender);
-        uint256 total = s.amount + reward;
-        
-        stakes[msg.sender].amount = 0;
-        totalStaked -= s.amount;
-        
-        token.transfer(msg.sender, total);
-        
-        emit Withdrawn(msg.sender, s.amount, reward);
-    }
+## Instalação
 
-    // Administração (só o dono)
-    function setRewardRate(uint256 newRate) external onlyOwner {
-        require(newRate <= 50, "Max 50% ao ano");
-        rewardRate = newRate;
-        emit RewardRateUpdated(newRate);
-    }
+```bash
+npm install
+```
 
-    function emergencyWithdraw() external onlyOwner {
-        token.transfer(owner(), token.balanceOf(address(this)));
-    }
-}
-[13/4 15:17] Davi Calixto: <!DOCTYPE html>
-<html>
-<head>
-  <title>CalixtoSuper Exchange</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+## Compilar Contratos
 
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
+```bash
+npx hardhat compile
+```
 
-<body style="background:#0b0e11;color:white;font-family:Arial;text-align:center">
+## Testes
 
-<h1>📊 Calixto Exchange</h1>
+```bash
+npx hardhat test
+```
 
-<button onclick="connectWallet()">Conectar</button>
+## Deploy na BSC Mainnet
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+1. Crie um arquivo `.env`:
+```
+PRIVATE_KEY=sua_chave_privada_aqui
+BSCSCAN_API_KEY=sua_api_key_bscscan
+```
 
-<div>
-  <h3>💰 Saldo</h3>
-  <p id="balance">-</p>
+2. Deploy:
+```bash
+npx hardhat run scripts/deploy.js --network bsc
+```
 
-  <h3>📦 Supply</h3>
-  <p id="supply">-</p>
+3. Verificar no BscScan:
+```bash
+npx hardhat verify --network bsc ENDERECO_DO_CONTRATO "0x4822e7d596772e58C567c5eD0510bb8f8f318d84"
+```
 
-  <h3>🤖 IA</h3>
-  <p id="ai">OFF</p>
+## Deploy Completo (1 comando)
 
-  <button onclick="sendToken()">Enviar Token</button>
-</div>
+Faz tudo de uma vez: deploy staking, deploy lock, recompensas, liquidez BNB, lock LP:
 
-<div>
-  <h3>📈 Gráfico</h3>
-  <canvas id="chart"></canvas>
-</div>
+```bash
+npx hardhat run scripts/deploy-full.js --network bsc
+```
 
-</div>
+Isso executa 5 TX reais na mainnet:
+1. Deploy `CalixtoStaking` → contrato de staking
+2. Deploy `CalixtoLiquidity` → contrato de lock de LP
+3. `depositRewards()` → deposita CALXT no pool de recompensas
+4. `addLiquidityETH()` → cria par CALXT/BNB no PancakeSwap com BNB real
+5. `lockLiquidity()` → trava LP tokens por 365 dias (lastro real)
 
-<h3>📜 Últimas Transações</h3>
-<ul id="txs"></ul>
+## Pontuação do Contrato
 
-<script src="app.js"></script>
+O que sobe a pontuação em GoPlus / TokenSniffer / DexScreener:
 
-</body>
-</html>
-[13/4 15:18] Davi Calixto: const RPC = "https://bsc-dataseed.binance.org/";
+- ✅ Liquidez com BNB real (lastro)
+- ✅ LP tokens travados 365 dias (anti-rugpull)
+- ✅ Contratos verificados no BscScan
+- ✅ SafeERC20 + ReentrancyGuard
+- ✅ emergencyWithdraw não toca fundos dos users
+- ✅ Código open-source no GitHub
 
-const CONTRACT = "0x4822e7d596772e58C567c5eD0510bb8f8f318d84";
+## Frontend
 
-const ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function totalSupply() view returns (uint256)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)",
-  "function transfer(address to, uint amount)"
-];
+Abra `frontend/index.html` no navegador ou sirva com:
 
-let provider = new ethers.JsonRpcProvider(RPC);
-let signer, user, contract;
+```bash
+npx http-server frontend
+```
 
-// CONECTAR WALLET
-async function connectWallet() {
-  if (!window.ethereum) {
-    alert("Abra no MetaMask ou Trust Wallet");
-    return;
-  }
+## Segurança
 
-  const browserProvider = new ethers.BrowserProvider(window.ethereum);
-
-  await window.ethereum.request({ method: "eth_requestAccounts" });
-
-  signer = await browserProvider.getSigner();
-  user = await signer.getAddress();
-
-  contract = new ethers.Contract(CONTRACT, ABI, signer);
-
-  loadDashboard();
-  loadChart();
-  loadTxs();
-  runAI();
-}
-
-// DASHBOARD
-async function loadDashboard() {
-  const [balance, supply, decimals, symbol] = await Promise.all([
-    contract.balanceOf(user),
-    contract.totalSupply(),
-    contract.decimals(),
-    contract.symbol()
-  ]);
-
-  document.getElementById("balance").innerText =
-    ethers.formatUnits(balance, decimals) + " " + symbol;
-
-  document.getElementById("supply").innerText =
-    ethers.formatUnits(supply, decimals);
-}
-
-// ENVIAR TOKEN
-async function sendToken() {
-  if (!signer) return alert("Conecte a wallet");
-
-  const tx = await contract.transfer(
-    "0x000000000000000000000000000000000000dead",
-    ethers.parseUnits("1", 18)
-  );
-
-  alert("TX: " + tx.hash);
-}
-
-// GRÁFICO
-function loadChart() {
-  const ctx = document.getElementById("chart");
-
-  new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: ["1","2","3","4","5","6"],
-      datasets: [{
-        label: "Preço CALXT",
-        data: [1,2,1.5,3,2.5,4]
-      }]
-    }
-  });
-}
-
-// TRANSAÇÕES
-async function loadTxs() {
-  try {
-    const url = `https://api.bscscan.com/api?module=account&action=txlist&address=${CONTRACT}&startblock=0&endblock=99999999&sort=desc`;
-
-    const res = await fetch(url);
-    const data = await res.json();
-
-    const txList = document.getElementById("txs");
-    txList.innerHTML = "";
-
-    data.result.slice(0,5).forEach(tx => {
-      let li = document.createElement("li");
-      li.innerText = tx.hash.slice(0,12) + "...";
-      txList.appendChild(li);
-    });
-  } catch (e) {
-    console.log("Erro TX:", e);
-  }
-}
-
-// IA
-function runAI() {
-  setInterval(async () => {
-    const block = await provider.getBlockNumber();
-
-    document.getElementById("ai").innerText =
-      block % 2 === 0 ? "📈 Alta" : "📉 Baixa";
-
-  }, 4000);
-}
-
-// EXPORTAR FUNÇÕES
-window.connectWallet = connectWallet;
-window.sendToken = sendToken;
+- Contrato usa `SafeERC20` para transferências seguras
+- `ReentrancyGuard` protege contra reentrância
+- Recompensas são liquidadas automaticamente ao adicionar stake
+- `emergencyWithdraw` limitado ao excedente (não toca fundos dos usuários)
+- Reward rate máximo: 50% ao ano
