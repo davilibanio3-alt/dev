@@ -1,0 +1,22 @@
+{
+  "name": "calixto-exchange",
+  "version": "1.0.0",
+  "description": "CalixtoSuper Exchange - A blockchain exchange interface",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx serve .",
+    "build": "echo 'Static site - no build required'",
+    "lint": "echo 'No linter configured'",
+    "test": "echo 'No tests configured'"
+  },
+  "keywords": [
+    "blockchain",
+    "exchange",
+    "web3"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@vercel/speed-insights": "^1.0.12"
+  }
+}
