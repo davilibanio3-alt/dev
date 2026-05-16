@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CalixtoSuper Exchange</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body style="background:#0b0e11;color:white;font-family:Arial;text-align:center">
+
+<h1>📊 Calixto Exchange</h1>
+
+<button onclick="connectWallet()">Conectar</button>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+
+<div>
+  <h3>💰 Saldo</h3>
+  <p id="balance">-</p>
+
+  <h3>📦 Supply</h3>
+  <p id="supply">-</p>
+
+  <h3>🤖 IA</h3>
+  <p id="ai">OFF</p>
+
+  <button onclick="sendToken()">Enviar Token</button>
+</div>
+
+<div>
+  <h3>📈 Gráfico</h3>
+  <canvas id="chart"></canvas>
+</div>
+
+</div>
+
+<h3>📜 Últimas Transações</h3>
+<ul id="txs"></ul>
+
+<script type="module" src="/app.js"></script>
+
+</body>
+</html>
