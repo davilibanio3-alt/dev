@@ -1,240 +1,549 @@
-[2/4 03:33] Davi Calixto: https://20lab.app/token/bnb-smart-chain/0x4822e7d596772e58C567c5eD0510bb8f8f318d84
-[9/4 00:31] Davi Calixto: 0x4822e7d596772e58C567c5eD0510bb8f8f318d84
-[12/4 22:54] Davi Calixto: // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+[9/6 09:52] Davi Calixto: /**
+ * @btc-platform/tx-engine
+ * Bitcoin Mainnet Transaction Engine
+ */
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import * as bitcoin from "bitcoinjs-lib";
+import * as bip32 from "bip32";
+import * as ecc from "tiny-secp256k1";
+import { ECPairFactory } from "ecpair";
 
-contract CalixtoStaking is ReentrancyGuard, Ownable {
-    IERC20 public immutable token;
-    
-    struct Stake {
-        uint256 amount;
-        uint256 startTime;
-    }
-    
-    mapping(address => Stake) public stakes;
-    
-    uint256 public rewardRate = 10; // 10% ao ano
-    uint256 public totalStaked;
-    
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount, uint256 reward);
-    event RewardRateUpdated(uint256 newRate);
+bitcoin.initEccLib(ecc);
 
-    constructor(address _token) Ownable(msg.sender) {
-        token = IERC20(_token);
-    }
+const ECPair = ECPairFactory(ecc);
 
-    function stake(uint256 amount) external nonReentrant {
-        require(amount > 0, "Amount must be > 0");
-        
-        token.transferFrom(msg.sender, address(this), amount);
-        
-        stakes[msg.sender].amount += amount;
-        if (stakes[msg.sender].startTime == 0) {
-            stakes[msg.sender].startTime = block.timestamp;
-        }
-        
-        totalStaked += amount;
-        
-        emit Staked(msg.sender, amount);
-    }
+export const NETWORK = bitcoin.networks.bitcoin;
 
-    function calculateReward(address user) public view returns (uint256) {
-        Stake memory s = stakes[user];
-        if (s.amount == 0) return 0;
-        
-        uint256 duration = block.timestamp - s.startTime;
-        return (s.amount * rewardRate * duration) / (365 days * 100);
-    }
-
-    function withdraw() external nonReentrant {
-        Stake memory s = stakes[msg.sender];
-        require(s.amount > 0, "No active stake");
-        
-        uint256 reward = calculateReward(msg.sender);
-        uint256 total = s.amount + reward;
-        
-        stakes[msg.sender].amount = 0;
-        totalStaked -= s.amount;
-        
-        token.transfer(msg.sender, total);
-        
-        emit Withdrawn(msg.sender, s.amount, reward);
-    }
-
-    // Administração (só o dono)
-    function setRewardRate(uint256 newRate) external onlyOwner {
-        require(newRate <= 50, "Max 50% ao ano");
-        rewardRate = newRate;
-        emit RewardRateUpdated(newRate);
-    }
-
-    function emergencyWithdraw() external onlyOwner {
-        token.transfer(owner(), token.balanceOf(address(this)));
-    }
+export interface UTXO {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey?: string;
 }
-[13/4 15:17] Davi Calixto: <!DOCTYPE html>
-<html>
-<head>
-  <title>CalixtoSuper Exchange</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
+export interface Output {
+  address: string;
+  value: number;
+}
 
-<body style="background:#0b0e11;color:white;font-family:Arial;text-align:center">
+export async function estimateFee(
+  feeRate: number,
+  inputs: number,
+  outputs: number
+): Promise<number> {
+  const vbytes = inputs * 68 + outputs * 31 + 10;
+  return Math.ceil(vbytes * feeRate);
+}
 
-<h1>📊 Calixto Exchange</h1>
+export function generateAddress(
+  xpub: string,
+  index = 0,
+  purpose: 84 | 44 | 49 | 86 = 84
+): string {
 
-<button onclick="connectWallet()">Conectar</button>
+  const node = bip32.fromBase58(xpub, NETWORK);
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+  const child = node.derive(0).derive(index);
 
-<div>
-  <h3>💰 Saldo</h3>
-  <p id="balance">-</p>
+  switch (purpose) {
 
-  <h3>📦 Supply</h3>
-  <p id="supply">-</p>
+    case 44:
+      return bitcoin.payments.p2pkh({
+        pubkey: child.publicKey,
+        network: NETWORK
+      }).address!;
 
-  <h3>🤖 IA</h3>
-  <p id="ai">OFF</p>
+    case 49:
+      return bitcoin.payments.p2sh({
+        redeem: bitcoin.payments.p2wpkh({
+          pubkey: child.publicKey,
+          network: NETWORK
+        }),
+        network: NETWORK
+      }).address!;
 
-  <button onclick="sendToken()">Enviar Token</button>
-</div>
+    case 84:
+      return bitcoin.payments.p2wpkh({
+        pubkey: child.publicKey,
+        network: NETWORK
+      }).address!;
 
-<div>
-  <h3>📈 Gráfico</h3>
-  <canvas id="chart"></canvas>
-</div>
+    case 86:
+      return bitcoin.payments.p2tr({
+        internalPubkey: child.publicKey.slice(1, 33),
+        network: NETWORK
+      }).address!;
 
-</div>
+    default:
+      throw new Error("Unsupported purpose");
+  }
+}
 
-<h3>📜 Últimas Transações</h3>
-<ul id="txs"></ul>
+export async function buildPSBT(
+  utxos: UTXO[],
+  outputs: Output[],
+  fee: number
+) {
 
-<script src="app.js"></script>
+  const psbt = new bitcoin.Psbt({
+    network: NETWORK
+  });
 
-</body>
-</html>
-[13/4 15:18] Davi Calixto: const RPC = "https://bsc-dataseed.binance.org/";
+  let totalInput = 0;
 
-const CONTRACT = "0x4822e7d596772e58C567c5eD0510bb8f8f318d84";
+  for (const utxo of utxos) {
 
-const ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function totalSupply() view returns (uint256)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)",
-  "function transfer(address to, uint amount)"
-];
+    totalInput += utxo.value;
 
-let provider = new ethers.JsonRpcProvider(RPC);
-let signer, user, contract;
-
-// CONECTAR WALLET
-async function connectWallet() {
-  if (!window.ethereum) {
-    alert("Abra no MetaMask ou Trust Wallet");
-    return;
+    psbt.addInput({
+      hash: utxo.txid,
+      index: utxo.vout,
+      witnessUtxo: {
+        script: Buffer.from(
+          utxo.scriptPubKey || "",
+          "hex"
+        ),
+        value: utxo.value
+      }
+    });
   }
 
-  const browserProvider = new ethers.BrowserProvider(window.ethereum);
+  let totalOutput = 0;
 
-  await window.ethereum.request({ method: "eth_requestAccounts" });
+  for (const output of outputs) {
 
-  signer = await browserProvider.getSigner();
-  user = await signer.getAddress();
+    totalOutput += output.value;
 
-  contract = new ethers.Contract(CONTRACT, ABI, signer);
+    psbt.addOutput({
+      address: output.address,
+      value: output.value
+    });
+  }
 
-  loadDashboard();
-  loadChart();
-  loadTxs();
-  runAI();
+  const change = totalInput - totalOutput - fee;
+
+  if (change < 0) {
+    throw new Error("Insufficient balance");
+  }
+
+  return {
+    psbt,
+    change
+  };
 }
 
-// DASHBOARD
-async function loadDashboard() {
-  const [balance, supply, decimals, symbol] = await Promise.all([
-    contract.balanceOf(user),
-    contract.totalSupply(),
-    contract.decimals(),
-    contract.symbol()
-  ]);
+export function signPSBT(
+  psbt: bitcoin.Psbt,
+  wif: string
+) {
 
-  document.getElementById("balance").innerText =
-    ethers.formatUnits(balance, decimals) + " " + symbol;
-
-  document.getElementById("supply").innerText =
-    ethers.formatUnits(supply, decimals);
-}
-
-// ENVIAR TOKEN
-async function sendToken() {
-  if (!signer) return alert("Conecte a wallet");
-
-  const tx = await contract.transfer(
-    "0x000000000000000000000000000000000000dead",
-    ethers.parseUnits("1", 18)
+  const keyPair = ECPair.fromWIF(
+    wif,
+    NETWORK
   );
 
-  alert("TX: " + tx.hash);
+  for (let i = 0; i < psbt.inputCount; i++) {
+    psbt.signInput(i, keyPair);
+  }
+
+  return psbt;
 }
 
-// GRÁFICO
-function loadChart() {
-  const ctx = document.getElementById("chart");
+export function finalizePSBT(
+  psbt: bitcoin.Psbt
+): string {
 
-  new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: ["1","2","3","4","5","6"],
-      datasets: [{
-        label: "Preço CALXT",
-        data: [1,2,1.5,3,2.5,4]
-      }]
+  psbt.finalizeAllInputs();
+
+  return psbt.extractTransaction().toHex();
+}
+
+export async function broadcast(
+  txHex: string
+): Promise<string> {
+
+  const response = await fetch(
+    "https://mempool.space/api/tx",
+    {
+      method: "POST",
+      body: txHex
     }
-  });
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await response.text()
+    );
+  }
+
+  return response.text();
 }
 
-// TRANSAÇÕES
-async function loadTxs() {
-  try {
-    const url = `https://api.bscscan.com/api?module=account&action=txlist&address=${CONTRACT}&startblock=0&endblock=99999999&sort=desc`;
+export async function fetchUTXOs(
+  address: string
+): Promise<UTXO[]> {
 
-    const res = await fetch(url);
-    const data = await res.json();
+  const response = await fetch(
+    `https://mempool.space/api/address/${address}/utxo`
+  );
 
-    const txList = document.getElementById("txs");
-    txList.innerHTML = "";
+  return response.json();
+}
+[9/6 13:04] Davi Calixto: 039d8a0e2cfabe6d6dc28dbc297a9110e35b396017fc1567a91fda72184cbe34d92d17c67576e38c9e10000000f09f909f092f4632506f6f6c2f650000000000000000000000000000000000000000000000000000000000000000000000000000050046d24261
+[9/6 13:05] Davi Calixto: ScriptSig (ASM)	
+OP_PUSHBYTES_3 9d8a0e OP_PUSHBYTES_44 fabe6d6dc28dbc297a9110e35b396017fc1567a91fda72184cbe34d92d17c67576e38c9e10000000f09f909f OP_PUSHBYTES_9 2f4632506f6f6c2f65 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_PUSHBYTES_5 0046d24261
+[9/6 19:14] Davi Calixto: git clone https://github.com/davilibanio3-alt/Opus-Davi.git
+cd Opus-Davi
+npm install
+[7/6 23:51] Davi Calixto: npm run build -w tx-engine
+npm run build -w recovery
+npm run build -w mining
+npm run build -w ai-engine
+[7/6 23:52] Davi Calixto: # ---- Backend ----
+PORT=8787
+HOST=0.0.0.0
+NODE_ENV=development
+CORS_ORIGINS=http://localhost:3000
 
-    data.result.slice(0,5).forEach(tx => {
-      let li = document.createElement("li");
-      li.innerText = tx.hash.slice(0,12) + "...";
-      txList.appendChild(li);
-    });
-  } catch (e) {
-    console.log("Erro TX:", e);
+# ---- Pool (Phase 2) ----
+# Bitcoin Core RPC (set automatically in container, but you can override)
+BITCOIN_RPC_URL=http://bitcoind:18332
+BITCOIN_RPC_USER=bitcoind
+BITCOIN_RPC_PASSWORD=your-secure-password-here
+
+# POOL PAYOUT ADDRESS — YOUR MAINNET ADDRESS
+# The pool REFUSES TO START without this.
+# Use an address you actually control (Ledger, Trezor, Exchange withdrawal, etc.)
+POOL_PAYOUT_ADDRESS=bc1q...  # Your Mainnet address
+
+# Optional: enable CPU miner for testing
+# (yields ~1-10 MH/s/core; statistically zero chance of finding a block on Mainnet)
+POOL_ENABLE_CPU_MINER=false
+
+# ---- Frontend ----
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8787
+NEXT_PUBLIC_MEMPOOL_API=https://mempool.space/api
+NEXT_PUBLIC_MEMPOOL_WS=wss://mempool.space/api/v1/ws
+NEXT_PUBLIC_NETWORK=mainnet
+[7/6 23:52] Davi Calixto: 2026-06-08T14:00:00Z Block tip: 952785
+[7/6 23:52] Davi Calixto: POOL_ENABLE_CPU_MINER=true
+[7/6 23:52] Davi Calixto: docker-compose up -d --build miner
+[7/6 23:53] Davi Calixto: [7/6 23:50] Davi Calixto: # 🏊 Mining Pool Deployment Guide
+
+Complete guide to deploy the Opus Davi **Phase 2 Mining Pool** on Mainnet.
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Prerequisites](#prerequisites)
+4. [Local Setup](#local-setup)
+5. [Production Deployment](#production-deployment)
+6. [Monitoring & Maintenance](#monitoring--maintenance)
+7. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+The **Opus Davi Mining Pool (Phase 2)** is a complete self-hosted Bitcoin Mainnet mining pool stack:
+
+- **Real Bitcoin Core 27.0** node with full consensus validation
+- **Stratum V1 server** for miners (ASIC + CPU)
+- **Pool statistics API** for monitoring
+- **Web dashboard** (Next.js) showing live workers, shares, hashrate, and blocks found
+- **CPU miner sidecar** for testing (optional)
+
+### Key Features
+
+✅ **Self-custody** — you control the full node, pool, and payouts  
+✅ **Real shares** — every share is validated server-side via SHA-256d  
+✅ **Real blocks** — found blocks are submitted to Mainnet via `submitblock`  
+✅ **Honest hashrate** — no faking; if no miners connected, you see 0 H/s  
+✅ **Production-ready** — containerized with health checks and monitoring
+
+---
+
+## Architecture
+[7/6 23:51] Davi Calixto: ### Data Flow
+
+1. **Bitcoin Core** — runs full node consensus, exports `getblocktemplate` via RPC + ZMQ block notifications
+2. **Stratum Server** — accepts miner connections, builds coinbase (BIP34 + extranonce + witness commitment), computes merkle branch, sends `mining.notify`
+3. **Miner** — receives job, sweeps `extraNonce2` + nonce, submits share via Stratum
+4. **Pool validation** — reconstructs 80-byte header, validates SHA-256d against share target + network target
+5. **Block found** — if hash ≤ network target, send to bitcoind via `submitblock`
+6. **Stats API** — pool /stats endpoint scraped by backend (2s TTL cache)
+7. **Frontend Dashboard** — WebSocket stream from backend shows live workers, shares, block candidates
+
+---
+
+## Prerequisites
+
+### Hardware
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **CPU** | 4 cores | 8+ cores (IBD faster) |
+| **RAM** | 8 GB | 16+ GB |
+| **Disk** | 800 GB | 1–2 TB SSD |
+| **Network** | 100 Mbps | 1 Gbps |
+
+### For Mainnet IBD (Initial Block Download)
+
+- **Time**: 1–4 days depending on hardware + network
+- **Bandwidth**: ~200 GB
+- **Disk**: ~655 GB (unpruned); ~15 GB (pruned=10000)
+
+### Software
+
+- **Docker** 20.10+ & **Docker Compose** 2.0+
+- **Node.js** 20+ (for local dev)
+- **Git**
+
+### Mainnet Requirements
+
+- **Bitcoin address** you control (for `POOL_PAYOUT_ADDRESS`)
+  - Can be hardware wallet, exchange withdrawal address, or self-hosted hot wallet
+  - **Do NOT use an address belonging to someone else**
+- **RPC password** (generated automatically in the bitcoind container)
+
+---
+
+## Local Setup
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/davilibanio3-alt/Opus-Davi.git
+cd Opus-Davi
+npm install
+[7/6 23:51] Davi Calixto: npm run build -w tx-engine
+npm run build -w recovery
+npm run build -w mining
+npm run build -w ai-engine
+[7/6 23:52] Davi Calixto: # ---- Backend ----
+PORT=8787
+HOST=0.0.0.0
+NODE_ENV=development
+CORS_ORIGINS=http://localhost:3000
+
+# ---- Pool (Phase 2) ----
+# Bitcoin Core RPC (set automatically in container, but you can override)
+BITCOIN_RPC_URL=http://bitcoind:18332
+BITCOIN_RPC_USER=bitcoind
+BITCOIN_RPC_PASSWORD=your-secure-password-here
+
+# POOL PAYOUT ADDRESS — YOUR MAINNET ADDRESS
+# The pool REFUSES TO START without this.
+# Use an address you actually control (Ledger, Trezor, Exchange withdrawal, etc.)
+POOL_PAYOUT_ADDRESS=bc1q...  # Your Mainnet address
+
+# Optional: enable CPU miner for testing
+# (yields ~1-10 MH/s/core; statistically zero chance of finding a block on Mainnet)
+POOL_ENABLE_CPU_MINER=false
+
+# ---- Frontend ----
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8787
+NEXT_PUBLIC_MEMPOOL_API=https://mempool.space/api
+NEXT_PUBLIC_MEMPOOL_WS=wss://mempool.space/api/v1/ws
+NEXT_PUBLIC_NETWORK=mainnet
+[7/6 23:52] Davi Calixto: 2026-06-08T14:00:00Z Block tip: 952785
+[7/6 23:52] Davi Calixto: POOL_ENABLE_CPU_MINER=true
+[7/6 23:52] Davi Calixto: docker-compose up -d --build miner
+[9/6 09:52] Davi Calixto: /**
+ * @btc-platform/tx-engine
+ * Bitcoin Mainnet Transaction Engine
+ */
+
+import * as bitcoin from "bitcoinjs-lib";
+import * as bip32 from "bip32";
+import * as ecc from "tiny-secp256k1";
+import { ECPairFactory } from "ecpair";
+
+bitcoin.initEccLib(ecc);
+
+const ECPair = ECPairFactory(ecc);
+
+export const NETWORK = bitcoin.networks.bitcoin;
+
+export interface UTXO {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey?: string;
+}
+
+export interface Output {
+  address: string;
+  value: number;
+}
+
+export async function estimateFee(
+  feeRate: number,
+  inputs: number,
+  outputs: number
+): Promise<number> {
+  const vbytes = inputs * 68 + outputs * 31 + 10;
+  return Math.ceil(vbytes * feeRate);
+}
+
+export function generateAddress(
+  xpub: string,
+  index = 0,
+  purpose: 84 | 44 | 49 | 86 = 84
+): string {
+
+  const node = bip32.fromBase58(xpub, NETWORK);
+
+  const child = node.derive(0).derive(index);
+
+  switch (purpose) {
+
+    case 44:
+      return bitcoin.payments.p2pkh({
+        pubkey: child.publicKey,
+        network: NETWORK
+      }).address!;
+
+    case 49:
+      return bitcoin.payments.p2sh({
+        redeem: bitcoin.payments.p2wpkh({
+          pubkey: child.publicKey,
+          network: NETWORK
+        }),
+        network: NETWORK
+      }).address!;
+
+    case 84:
+      return bitcoin.payments.p2wpkh({
+        pubkey: child.publicKey,
+        network: NETWORK
+      }).address!;
+
+    case 86:
+      return bitcoin.payments.p2tr({
+        internalPubkey: child.publicKey.slice(1, 33),
+        network: NETWORK
+      }).address!;
+
+    default:
+      throw new Error("Unsupported purpose");
   }
 }
 
-// IA
-function runAI() {
-  setInterval(async () => {
-    const block = await provider.getBlockNumber();
+export async function buildPSBT(
+  utxos: UTXO[],
+  outputs: Output[],
+  fee: number
+) {
 
-    document.getElementById("ai").innerText =
-      block % 2 === 0 ? "📈 Alta" : "📉 Baixa";
+  const psbt = new bitcoin.Psbt({
+    network: NETWORK
+  });
 
-  }, 4000);
+  let totalInput = 0;
+
+  for (const utxo of utxos) {
+
+    totalInput += utxo.value;
+
+    psbt.addInput({
+      hash: utxo.txid,
+      index: utxo.vout,
+      witnessUtxo: {
+        script: Buffer.from(
+          utxo.scriptPubKey || "",
+          "hex"
+        ),
+        value: utxo.value
+      }
+    });
+  }
+
+  let totalOutput = 0;
+
+  for (const output of outputs) {
+
+    totalOutput += output.value;
+
+    psbt.addOutput({
+      address: output.address,
+      value: output.value
+    });
+  }
+
+  const change = totalInput - totalOutput - fee;
+
+  if (change < 0) {
+    throw new Error("Insufficient balance");
+  }
+
+  return {
+    psbt,
+    change
+  };
 }
 
-// EXPORTAR FUNÇÕES
-window.connectWallet = connectWallet;
-window.sendToken = sendToken;
+export function signPSBT(
+  psbt: bitcoin.Psbt,
+  wif: string
+) {
+
+  const keyPair = ECPair.fromWIF(
+    wif,
+    NETWORK
+  );
+
+  for (let i = 0; i < psbt.inputCount; i++) {
+    psbt.signInput(i, keyPair);
+  }
+
+  return psbt;
+}
+
+export function finalizePSBT(
+  psbt: bitcoin.Psbt
+): string {
+
+  psbt.finalizeAllInputs();
+
+  return psbt.extractTransaction().toHex();
+}
+
+export async function broadcast(
+  txHex: string
+): Promise<string> {
+
+  const response = await fetch(
+    "https://mempool.space/api/tx",
+    {
+      method: "POST",
+      body: txHex
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await response.text()
+    );
+  }
+
+  return response.text();
+}
+
+export async function fetchUTXOs(
+  address: string
+): Promise<UTXO[]> {
+
+  const response = await fetch(
+    `https://mempool.space/api/address/${address}/utxo`
+  );
+
+  return response.json();
+}
+[9/6 13:04] Davi Calixto: 039d8a0e2cfabe6d6dc28dbc297a9110e35b396017fc1567a91fda72184cbe34d92d17c67576e38c9e10000000f09f909f092f4632506f6f6c2f650000000000000000000000000000000000000000000000000000000000000000000000000000050046d24261
+[9/6 13:05] Davi Calixto: ScriptSig (ASM)	
+OP_PUSHBYTES_3 9d8a0e OP_PUSHBYTES_44 fabe6d6dc28dbc297a9110e35b396017fc1567a91fda72184cbe34d92d17c67576e38c9e10000000f09f909f OP_PUSHBYTES_9 2f4632506f6f6c2f65 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_0 OP_PUSHBYTES_5 0046d24261
+
+    
+
